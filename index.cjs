@@ -1,82 +1,79 @@
 const WebSocket = require("ws");
+const express = require("express");
+
+const app = express();
+
 const wss = new WebSocket.Server({ port: 3001 });
 
 let waiting = null;
 
-wss.on("connection", (ws) => {
-  console.log("New client connected");
+app.get("/", (req, res) => {
+  res.send("Signaling server is running");
+});
 
-  ws.on("message", (msg) => {
-    const data = msg.toString();
+// wss.on("connection", (ws) => {
+//   console.log("New client connected");
 
-    // When user joins the queue
-    if (data === "join") {
-      console.log("User joined the queue");
+//   ws.on("message", (msg) => {
+//     const data = msg.toString();
 
-      if (!waiting) {
-        waiting = ws;
-        console.log("Waiting for partner...");
-      } else {
-        // Match 2 users
-        ws.partner = waiting;
-        waiting.partner = ws;
+//     // JOIN QUEUE
+//     if (data === "join") {
+//       console.log("User joined the queue");
 
-        console.log("Matched two users!");
+//       if (!waiting) {
+//         waiting = ws;
+//         console.log("Waiting for partner...");
+//       } else {
+//         ws.partner = waiting;
+//         waiting.partner = ws;
 
-        ws.send(JSON.stringify({ type: "match" }));
-        waiting.send(JSON.stringify({ type: "match" }));
+//         console.log("Matched two users!");
 
-        waiting = null;
-      }
-      return;
-    }
+//         ws.send(JSON.stringify({ type: "match" }));
+//         waiting.send(JSON.stringify({ type: "match" }));
 
-    // When user disconnects from call
-    if (data === "disconnect") {
-      console.log("User requested disconnect");
-      
-      if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
-        // Notify partner that user disconnected
-        ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
-        ws.partner.partner = null;
-      }
-      
-      ws.partner = null;
-      console.log("User disconnected from partner");
-      return;
-    }
+//         waiting = null;
+//       }
+//       return;
+//     }
 
-    // Relay signaling messages to the matched partner
-    try {
-      const json = JSON.parse(data);
+//     // DISCONNECT
+//     if (data === "disconnect") {
+//       console.log("User requested disconnect");
+//       if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
+//         ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
+//         ws.partner.partner = null;
+//       }
+//       ws.partner = null;
+//       return;
+//     }
 
-      if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
-        ws.partner.send(JSON.stringify(json));
-      }
-    } catch (err) {
-      console.log("JSON error:", err);
-    }
-  });
+//     // RELAY SIGNALING DATA
+//     try {
+//       const json = JSON.parse(data);
+//       if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
+//         ws.partner.send(JSON.stringify(json));
+//       }
+//     } catch (err) {
+//       console.log("JSON error:", err);
+//     }
+//   });
 
-  ws.on("close", () => {
-    console.log("Client disconnected");
-    
-    // Remove from waiting queue if present
-    if (waiting === ws) {
-      waiting = null;
-      console.log("Removed from waiting queue");
-    }
+//   ws.on("close", () => {
+//     console.log("Client disconnected");
+//     if (waiting === ws) waiting = null;
 
-    // Notify partner if in active call
-    if (ws.partner) {
-      if (ws.partner.readyState === WebSocket.OPEN) {
-        ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
-      }
-      ws.partner.partner = null;
-      ws.partner = null;
-      console.log("Partner notified of disconnection");
-    }
-  });
+//     if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
+//       ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
+//       ws.partner.partner = null;
+//     }
+//     ws.partner = null;
+//   });
+// });
+
+app.listen(3000, () => {
+  console.log("HTTP server running on http://localhost:3000");
 });
 
 console.log("Signaling server running on ws://localhost:3001");
