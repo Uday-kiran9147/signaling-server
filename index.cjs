@@ -1,49 +1,28 @@
-const express = require("express");
-const http = require("http");
 const WebSocket = require("ws");
+const wss = new WebSocket.Server({ port: 3001 });
 
-const app = express();
-
-// Azure provides PORT environment variable
-const PORT = process.env.PORT || 3000;
-
-// Simple health check
-app.get("/", (req, res) => {
-  res.send("Signaling server is running");
-});
-
-// Create HTTP server for Express
-const server = http.createServer(app);
-
-// Attach WebSocket server to same HTTP server
-const wss = new WebSocket.Server({ server });
-
-// Queue for matchmaking
 let waiting = null;
 
 wss.on("connection", (ws) => {
-  console.log("New client connected");
-
-  ws.isAlive = true;
-
-  // Heartbeat to detect dead connections
-  ws.on("pong", () => { ws.isAlive = true; });
+  console.log("✅ New client connected");
 
   ws.on("message", (msg) => {
     const data = msg.toString();
 
-    // JOIN QUEUE
+    // When user joins the queue
     if (data === "join") {
-      console.log("User joined the queue");
+      console.log("👤 User joined the queue");
 
       if (!waiting) {
         waiting = ws;
-        console.log("Waiting for partner...");
+        console.log("⏳ Waiting for partner...");
       } else {
+        // Match 2 users
         ws.partner = waiting;
         waiting.partner = ws;
 
-        console.log("Matched two users!");
+        console.log("🎉 Matched two users!");
+
         ws.send(JSON.stringify({ type: "match" }));
         waiting.send(JSON.stringify({ type: "match" }));
 
@@ -52,61 +31,56 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // DISCONNECT
+    // When user disconnects from call
     if (data === "disconnect") {
-      console.log("User requested disconnect");
+      console.log("📞 User requested disconnect");
+      
       if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
+        // Notify partner that user disconnected
         ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
         ws.partner.partner = null;
       }
+      
       ws.partner = null;
+      console.log("✅ User disconnected from partner");
       return;
     }
 
-    // RELAY SIGNALING DATA
+    // Relay signaling messages to the matched partner
     try {
       const json = JSON.parse(data);
+      console.log(`📨 Relaying ${json.type} to partner`);
+
       if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
         ws.partner.send(JSON.stringify(json));
+        console.log(`✅ ${json.type} relayed successfully`);
+      } else {
+        console.log(`⚠️ No partner available to relay ${json.type}`);
       }
     } catch (err) {
-      console.error("JSON parse error:", err);
+      console.log("❌ JSON parse error:", err);
     }
   });
 
   ws.on("close", () => {
-    console.log("Client disconnected");
-    if (waiting === ws) waiting = null;
-
-    if (ws.partner && ws.partner.readyState === WebSocket.OPEN) {
-      ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
-      ws.partner.partner = null;
+    console.log("❌ Client disconnected");
+    
+    // Remove from waiting queue if present
+    if (waiting === ws) {
+      waiting = null;
+      console.log("🗑️ Removed from waiting queue");
     }
-    ws.partner = null;
+
+    // Notify partner if in active call
+    if (ws.partner) {
+      if (ws.partner.readyState === WebSocket.OPEN) {
+        ws.partner.send(JSON.stringify({ type: "partner_disconnected" }));
+        console.log("📢 Partner notified of disconnection");
+      }
+      ws.partner.partner = null;
+      ws.partner = null;
+    }
   });
 });
 
-// Ping clients periodically to keep connection alive (WebSocket heartbeat)
-const interval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping(() => {});
-  });
-}, 30000); // every 30 seconds
-
-// Start server
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`HTTP server running on port http://localhost:${PORT}`);
-  console.log(`WebSocket server ready at ws://localhost:${PORT}`);
-});
-
-// Clean up on process exit
-process.on("SIGTERM", () => {
-  clearInterval(interval);
-  wss.close();
-  server.close(() => {
-    console.log("Server shutting down gracefully");
-    process.exit(0);
-  });
-});
+console.log("🚀 Signaling server running on ws://localhost:3001");
