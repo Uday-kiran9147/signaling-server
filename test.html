@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebRTC Video Chat</title>
+  <style>
+    body {
+      background: #111;
+      color: white;
+      padding: 20px;
+      font-family: Arial;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .container {
+      display: flex;
+      gap: 20px;
+    }
+
+    .video-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    video {
+      width: 350px;
+      height: 280px;
+      background: black;
+      border: 2px solid #444;
+    }
+
+    .label {
+      font-size: 18px;
+      color: #bbb;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+    <div class="video-box">
+      <video id="localVideo" autoplay playsinline muted></video>
+      <div class="label">You</div>
+    </div>
+
+    <div class="video-box">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="label">Partner</div>
+    </div>
+  </div>
+
+<script>
+console.clear();
+
+// WebSocket signaling connection
+const socket = new WebSocket("ws://localhost:3001");
+
+let peer = null;
+let localStream = null;
+
+// Start camera first
+async function startCamera() {
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+
+    document.getElementById("localVideo").srcObject = localStream;
+    console.log("Camera started");
+
+  } catch (err) {
+    console.error("Camera error:", err);
+  }
+}
+
+// Wait for WebSocket connection
+socket.onopen = () => {
+  console.log("Connected to signaling server");
+  socket.send("join");
+};
+
+// Incoming messages
+socket.onmessage = async (msg) => {
+  const data = JSON.parse(msg.data);
+  console.log("SIGNALING:", data);
+
+  // Ensure camera is ready before WebRTC
+  if (!localStream) {
+    console.log("Waiting for camera before starting peer");
+    await startCamera();
+  }
+
+  if (data.type === "match") {
+    console.log("Matched → Creating peer as caller");
+    createPeer(true);
+  }
+
+  if (data.type === "offer") {
+    console.log("Offer received");
+    createPeer(false);
+
+    await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+
+    socket.send(JSON.stringify({ type: "answer", answer }));
+  }
+
+  if (data.type === "answer") {
+    console.log("Answer received");
+    await peer.setRemoteDescription(new RTCSessionDescription(data.answer));
+  }
+
+  if (data.type === "ice") {
+    console.log("ICE received");
+    try {
+      await peer.addIceCandidate(data.candidate);
+    } catch (err) {
+      console.error("ICE add error:", err);
+    }
+  }
+};
+
+// Create WebRTC PeerConnection
+function createPeer(isCaller) {
+  if (peer) return; // Prevent duplicate peers
+
+  peer = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      {
+        urls: "turn:relay1.expressturn.com:3478",
+        username: "efetch",
+        credential: "efetch"
+      }
+    ]
+  });
+
+  console.log("PeerConnection created");
+
+  // Add local tracks
+  localStream.getTracks().forEach(track => {
+    peer.addTrack(track, localStream);
+  });
+
+  // Remote stream
+  peer.ontrack = (event) => {
+    console.log("Remote stream received");
+    const remoteVideo = document.getElementById("remoteVideo");
+    remoteVideo.srcObject = event.streams[0];
+  };
+
+  // ICE candidates
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+    }
+  };
+
+  peer.onconnectionstatechange = () => {
+    console.log("State:", peer.connectionState);
+  };
+
+  // Caller creates offer
+  if (isCaller) createOffer();
+}
+
+// Caller creates offer
+async function createOffer() {
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  socket.send(JSON.stringify({ type: "offer", offer }));
+}
+
+// Start camera immediately
+startCamera();
+
+</script>
+
+</body>
+</html>
